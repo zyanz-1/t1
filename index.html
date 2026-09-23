@@ -193,19 +193,20 @@ input,select,button{max-width:100%;min-width:0}
       <h2 class="section-title" style="margin-top:20px">3. Tampilan</h2>
       <div class="options">
         <div>
-          <label for="position" style="margin-top:0">Posisi</label>
-          <select id="position">
-            <option value="bottom-right">Kanan bawah</option>
-            <option value="bottom-left">Kiri bawah</option>
-            <option value="top-right">Kanan atas</option>
-            <option value="top-left">Kiri atas</option>
-          </select>
-        </div>
-        <div>
           <label for="size" style="margin-top:0">Ukuran teks</label>
           <div class="range-row">
             <input id="size" type="range" min="16" max="80" value="32">
             <span id="sizeValue" class="range-value">32</span>
+          </div>
+        </div>
+        <div>
+          <label for="mapSize" style="margin-top:0">Ukuran peta pada foto</label>
+          <div class="range-row">
+            <input id="mapSize" type="range" min="20" max="50" value="32">
+            <input id="mapSizeNumber" type="number" min="20" max="50" step="1" value="32"
+                   aria-label="Ukuran peta pada foto dalam persen"
+                   title="Ukuran peta 20 sampai 50 persen lebar foto">
+            <span class="opacity-value">%</span>
           </div>
         </div>
       </div>
@@ -278,7 +279,8 @@ const $=id=>document.getElementById(id);
 const fileInput=$("file"),drop=$("drop"),processBtn=$("process"),downloadBtn=$("download");
 const preview=$("preview"),status=$("status"),size=$("size"),sizeValue=$("sizeValue");
 const fontFamily=$("fontFamily"),fontColor=$("fontColor"),bgColor=$("bgColor"),
-      bgOpacity=$("bgOpacity"),bgOpacityNumber=$("bgOpacityNumber");
+      bgOpacity=$("bgOpacity"),bgOpacityNumber=$("bgOpacityNumber"),
+      mapSize=$("mapSize"),mapSizeNumber=$("mapSizeNumber");
 
 let originalImage=null,outputBlob=null,originalFileName="foto";
 const DEFAULT={lat:-2.7833,lon:115.2667};
@@ -293,6 +295,16 @@ function setNow(){
 setNow();
 
 size.addEventListener("input",()=>sizeValue.textContent=size.value);
+function setMapSize(value){
+ let v=Number(value);
+ if(!Number.isFinite(v))v=32;
+ v=Math.min(50,Math.max(20,Math.round(v)));
+ mapSize.value=v;mapSizeNumber.value=v;
+}
+mapSize.addEventListener("input",()=>setMapSize(mapSize.value));
+mapSizeNumber.addEventListener("input",()=>setMapSize(mapSizeNumber.value));
+mapSizeNumber.addEventListener("change",()=>setMapSize(mapSizeNumber.value));
+setMapSize(32);
 
 function setOpacity(value){
  let v=Number(value);
@@ -338,21 +350,48 @@ function setCoords(lat,lon,moveMap=true){
 }
 
 async function reverseGeocode(lat,lon){
- setLocationStatus("Mengambil nama desa/kecamatan dari koordinat…");
+ setLocationStatus("Mengambil nama desa/kecamatan/kabupaten dari koordinat…");
  try{
    const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1`;
    const res=await fetch(url,{headers:{"Accept":"application/json"}});
    if(!res.ok)throw new Error("HTTP "+res.status);
    const data=await res.json();
    const a=data.address||{};
-   $("desa").value=a.village||a.hamlet||a.suburb||a.neighbourhood||a.town||$("desa").value;
-   $("kecamatan").value=a.municipality||a.county||a.city_district||a.district||$("kecamatan").value;
-   $("kabupaten").value=a.city||a.regency||a.county||$("kabupaten").value||"Hulu Sungai Selatan";
-   $("provinsi").value=a.state||$("provinsi").value||"Kalimantan Selatan";
-   setLocationStatus("Lokasi dan alamat berhasil diperbarui. Alamat tetap bisa diedit manual.");
+
+   // Nominatim memakai struktur administratif yang berbeda-beda antarwilayah.
+   // Untuk Indonesia, district diprioritaskan sebagai Kecamatan dan regency
+   // diprioritaskan sebagai Kabupaten. county hanya dipakai sebagai fallback.
+   const desa=a.village||a.hamlet||a.suburb||a.neighbourhood||a.quarter||"";
+   const kec=a.district||a.city_district||a.municipality||"";
+   const kab=a.regency||a.county||"";
+   const prov=a.state||"";
+
+   if(desa)$('desa').value=cleanAdminName(desa);
+   if(kec)$('kecamatan').value=cleanAdminName(kec);
+   if(kab)$('kabupaten').value=cleanAdminName(kab);
+   if(prov)$('provinsi').value=cleanAdminName(prov);
+
+   // Hindari hasil tertukar: kecamatan dan kabupaten tidak boleh sama.
+   if($('kecamatan').value.trim().toLowerCase()===$('kabupaten').value.trim().toLowerCase()){
+     if(a.regency && cleanAdminName(a.regency).toLowerCase()!==$('kecamatan').value.trim().toLowerCase()){
+       $('kabupaten').value=cleanAdminName(a.regency);
+     }else if(a.district && cleanAdminName(a.district).toLowerCase()!==$('kabupaten').value.trim().toLowerCase()){
+       $('kecamatan').value=cleanAdminName(a.district);
+     }
+   }
+
+   setLocationStatus("Lokasi dan wilayah berhasil diperbarui. Semua kolom tetap bisa diedit manual.");
  }catch(e){
    setLocationStatus("Koordinat berhasil dipilih, tetapi nama wilayah tidak dapat diambil otomatis. Silakan isi/edit manual.",true);
  }
+}
+
+function cleanAdminName(value){
+ return String(value||"")
+   .replace(/^Kabupaten\s+/i,"")
+   .replace(/^Kota\s+/i,"")
+   .replace(/^Kecamatan\s+/i,"")
+   .trim();
 }
 
 function selectLocation(lat,lon,lookup=true){
@@ -456,6 +495,12 @@ function roundedRect(ctx,x,y,w,h,r){
  ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);
  ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();
 }
+function formatAltitude(value){
+ let n=Number(String(value).replace(",","."));
+ if(!Number.isFinite(n))return String(value).trim();
+ return n.toFixed(1).replace(/\.0$/,"").replace(".",",");
+}
+
 function addressLines(){
  const desa=$("desa").value.trim();
  const kec=$("kecamatan").value.trim();
@@ -522,12 +567,15 @@ async function buildMapInset(lat,lon){
  return canvas;
 }
 
-function drawMapInset(ctx,mapCanvas,position,margin){
- const targetW=Math.round(Math.min(ctx.canvas.width*.27,260));
- const targetH=Math.round(targetW*.66);
- // Peta selalu ditempatkan di kiri bawah sesuai desain output.
+function drawMapInset(ctx,mapCanvas,margin){
+ // Ukuran peta diatur pengguna sebagai persentase lebar foto.
+ const requestedW=ctx.canvas.width*(Number(mapSize.value||32)/100);
+ const maxW=Math.max(120,ctx.canvas.width-margin*2);
+ const targetW=Math.min(requestedW,maxW);
+ const targetH=Math.round(targetW*(mapCanvas.height/mapCanvas.width));
+ // Posisi peta dikunci di kiri bawah.
  const x=margin;
- const y=ctx.canvas.height-targetH-margin;
+ const y=Math.max(margin,ctx.canvas.height-targetH-margin);
  ctx.save();
  ctx.shadowColor="rgba(0,0,0,.28)";ctx.shadowBlur=10;ctx.shadowOffsetY=3;
  ctx.drawImage(mapCanvas,x,y,targetW,targetH);
@@ -541,11 +589,11 @@ processBtn.addEventListener("click",async()=>{
  ctx.drawImage(originalImage,0,0);
 
  const s=Number(size.value);
- const altitude=$("altitude").value.trim();
- const coordinateLine=`${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`;
+ const altitude=String($("altitude").value||"").trim();
+ const coordinateLine=`${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}${altitude?`   ${formatAltitude(altitude)}m`:""}`;
  const dateLine=dateTimeText();
  const locations=addressLines();
- const lines=[dateLine,coordinateLine,...locations,altitude?`Ketinggian: ${altitude} mdpl`:""].filter(Boolean);
+ const lines=[dateLine,coordinateLine,...locations].filter(Boolean);
  const fontName=fontFamily.value||"Arial";
  const textColor=fontColor.value||"#ffffff";
  const backgroundColor=bgColor.value||"#ffffff";
@@ -557,8 +605,9 @@ processBtn.addEventListener("click",async()=>{
  const w=Math.ceil(Math.max(...widths,1)+padX*2);
  const h=Math.ceil(lines.length*s+(lines.length-1)*gap+padY*2);
  const margin=Math.round(s*.8);
- let x=$("position").value.includes("right")?canvas.width-w-margin:margin;
- let y=$("position").value.includes("bottom")?canvas.height-h-margin:margin;
+ // Timestamp dikunci di kanan bawah.
+ let x=canvas.width-w-margin;
+ let y=canvas.height-h-margin;
  x=Math.max(0,x);y=Math.max(0,y);
 
  ctx.save();
@@ -572,7 +621,7 @@ processBtn.addEventListener("click",async()=>{
    setStatus("Menyiapkan peta pada foto…");
    try{
      const mapCanvas=await buildMapInset(coords.lat,coords.lon);
-     drawMapInset(ctx,mapCanvas,$("position").value,margin);
+     drawMapInset(ctx,mapCanvas,margin);
    }catch(e){
      console.warn(e);
      setStatus("Timestamp berhasil, tetapi peta tidak dapat dimuat.",true);
