@@ -78,6 +78,10 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
 /* Map & location controls */
 #map{height:270px;border-radius:12px;border:1px solid #d0d5dd;overflow:hidden;margin-top:9px}
 .map-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.map-output-toggle{display:flex;align-items:center;gap:9px;margin-top:11px;padding:10px 11px;border:1px solid #e4e7ec;border-radius:9px;background:#f8fafc;font-size:12px;font-weight:700}
+.map-output-toggle input{width:17px;height:17px;accent-color:var(--primary);cursor:pointer}
+.map-output-toggle span{font-weight:700}
+
 .location-status{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
 .leaflet-container{font-family:inherit}
 .address-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
@@ -127,6 +131,10 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
         <button id="defaultLocation" type="button" class="btn btn-secondary">🏠 Kembali ke Kandangan</button>
       </div>
       <div id="locationStatus" class="location-status">Klik peta untuk memilih lokasi.</div>
+      <label class="map-output-toggle" for="includeMap">
+        <input id="includeMap" type="checkbox" checked>
+        <span>Tampilkan peta pada foto hasil</span>
+      </label>
 
       <div class="address-grid">
         <div><label for="desa">Desa / Kelurahan</label><input id="desa" type="text" placeholder="Nama desa/kelurahan"></div>
@@ -141,7 +149,7 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
       </div>
       <div class="row">
         <div><label for="altitude">Ketinggian (mdpl)</label><input id="altitude" type="number" step="0.1" placeholder="Opsional"></div>
-        <div><label for="date">Tanggal</label><input id="date" type="date"></div>
+        <div><label for="date">Tanggal</label><input id="date" type="date" aria-label="Pilih tanggal"></div>
       </div>
       <div>
         <label for="time">Jam</label><input id="time" type="time" step="1">
@@ -413,17 +421,87 @@ function roundedRect(ctx,x,y,w,h,r){
  ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);
  ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();
 }
-function addressText(){
- const parts=[
-   $("desa").value.trim(),
-   $("kecamatan").value.trim(),
-   $("kabupaten").value.trim(),
-   $("provinsi").value.trim()
- ].filter(Boolean);
- return parts.join(", ");
+function addressLines(){
+ const desa=$("desa").value.trim();
+ const kec=$("kecamatan").value.trim();
+ const kab=$("kabupaten").value.trim();
+ const prov=$("provinsi").value.trim();
+ const lines=[];
+ if(desa||kec) lines.push([desa,kec].filter(Boolean).join(", "));
+ if(kab||prov) lines.push([kab,prov].filter(Boolean).join(", "));
+ return lines;
 }
 
-processBtn.addEventListener("click",()=>{
+function loadTile(url){
+ return new Promise((resolve,reject)=>{
+   const img=new Image();
+   img.crossOrigin="anonymous";
+   img.onload=()=>resolve(img);
+   img.onerror=()=>reject(new Error("Gagal memuat tile peta"));
+   img.src=url;
+ });
+}
+
+function lonLatToTile(lon,lat,z){
+ const n=2**z;
+ const x=(lon+180)/360*n;
+ const latRad=lat*Math.PI/180;
+ const y=(1-Math.asinh(Math.tan(latRad))/Math.PI)/2*n;
+ return {x,y};
+}
+
+async function buildMapInset(lat,lon){
+ const zoom=15, tileSize=256, radius=1;
+ const center=lonLatToTile(lon,lat,zoom);
+ const cx=Math.floor(center.x), cy=Math.floor(center.y);
+ const canvas=document.createElement("canvas");
+ canvas.width=tileSize*(radius*2+1);canvas.height=tileSize*(radius*2+1);
+ const ctx=canvas.getContext("2d");
+ ctx.fillStyle="#e5e7eb";ctx.fillRect(0,0,canvas.width,canvas.height);
+ const n=2**zoom;
+ for(let dy=-radius;dy<=radius;dy++){
+   for(let dx=-radius;dx<=radius;dx++){
+     let tx=cx+dx,ty=cy+dy;
+     const wrappedX=((tx%n)+n)%n;
+     if(ty<0||ty>=n) continue;
+     try{
+       const img=await loadTile(`https://tile.openstreetmap.org/${zoom}/${wrappedX}/${ty}.png`);
+       ctx.drawImage(img,(dx+radius)*tileSize,(dy+radius)*tileSize,tileSize,tileSize);
+     }catch(e){
+       // Peta tetap dibuat dengan background kosong bila salah satu tile gagal.
+     }
+   }
+ }
+ const px=(center.x-cx+radius)*tileSize;
+ const py=(center.y-cy+radius)*tileSize;
+ // marker pin sederhana
+ ctx.save();
+ ctx.beginPath();ctx.arc(px,py-8,9,0,Math.PI*2);ctx.fillStyle="#d92d20";ctx.fill();
+ ctx.beginPath();ctx.moveTo(px-7,py-2);ctx.lineTo(px,py+10);ctx.lineTo(px+7,py-2);ctx.closePath();ctx.fillStyle="#d92d20";ctx.fill();
+ ctx.beginPath();ctx.arc(px,py-8,3,0,Math.PI*2);ctx.fillStyle="#fff";ctx.fill();
+ ctx.restore();
+ // bingkai + atribusi
+ ctx.strokeStyle="rgba(0,0,0,.25)";ctx.lineWidth=2;ctx.strokeRect(1,1,canvas.width-2,canvas.height-2);
+ ctx.fillStyle="rgba(255,255,255,.85)";ctx.fillRect(4,canvas.height-18,122,14);
+ ctx.fillStyle="#333";ctx.font="10px Arial";ctx.fillText("© OpenStreetMap",8,canvas.height-7);
+ return canvas;
+}
+
+function drawMapInset(ctx,mapCanvas,position,margin){
+ const targetW=Math.round(Math.min(ctx.canvas.width*.27,260));
+ const targetH=Math.round(targetW*.66);
+ const right=position.includes("right");
+ const bottom=position.includes("bottom");
+ // Put map opposite the timestamp to avoid overlap.
+ const x=right?margin:ctx.canvas.width-targetW-margin;
+ const y=bottom?margin:ctx.canvas.height-targetH-margin;
+ ctx.save();
+ ctx.shadowColor="rgba(0,0,0,.28)";ctx.shadowBlur=10;ctx.shadowOffsetY=3;
+ ctx.drawImage(mapCanvas,x,y,targetW,targetH);
+ ctx.restore();
+}
+
+processBtn.addEventListener("click",async()=>{
  const coords=valid();if(!coords)return;
  const canvas=document.createElement("canvas"),ctx=canvas.getContext("2d");
  canvas.width=originalImage.naturalWidth;canvas.height=originalImage.naturalHeight;
@@ -431,21 +509,19 @@ processBtn.addEventListener("click",()=>{
 
  const s=Number(size.value);
  const altitude=$("altitude").value.trim();
- const line1=`${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`;
- const line2=altitude?`Elevasi: ${altitude} mdpl`:"";
- const line3=dateTimeText();
- const line4=addressText();
-
- const lines=[line1,line2,line3,line4].filter(Boolean);
+ const coordinateLine=`${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`;
+ const dateLine=dateTimeText();
+ const locations=addressLines();
+ const lines=[dateLine,coordinateLine,...locations,altitude?`Ketinggian: ${altitude} mdpl`:""].filter(Boolean);
  const fontName=fontFamily.value||"Arial";
  const textColor=fontColor.value||"#ffffff";
  const backgroundColor=bgColor.value||"#ffffff";
  const backgroundAlpha=Number(bgOpacity.value)/100;
 
  ctx.font=`700 ${s}px "${fontName}", Arial, sans-serif`;ctx.textBaseline="top";
- const padX=Math.round(s*.65),padY=Math.round(s*.5),gap=Math.round(s*.18);
+ const padX=Math.round(s*.65),padY=Math.round(s*.5),gap=Math.round(s*.16);
  const widths=lines.map(t=>ctx.measureText(t).width);
- const w=Math.ceil(Math.max(...widths)+padX*2);
+ const w=Math.ceil(Math.max(...widths,1)+padX*2);
  const h=Math.ceil(lines.length*s+(lines.length-1)*gap+padY*2);
  const margin=Math.round(s*.8);
  let x=$("position").value.includes("right")?canvas.width-w-margin:margin;
@@ -458,6 +534,17 @@ processBtn.addEventListener("click",()=>{
  ctx.globalAlpha=1;ctx.fillStyle=textColor;ctx.font=`700 ${s}px "${fontName}", Arial, sans-serif`;
  lines.forEach((line,i)=>ctx.fillText(line,x+padX,y+padY+i*(s+gap)));
  ctx.restore();
+
+ if($("includeMap").checked){
+   setStatus("Menyiapkan peta pada foto…");
+   try{
+     const mapCanvas=await buildMapInset(coords.lat,coords.lon);
+     drawMapInset(ctx,mapCanvas,$("position").value,margin);
+   }catch(e){
+     console.warn(e);
+     setStatus("Timestamp berhasil, tetapi peta tidak dapat dimuat.",true);
+   }
+ }
 
  preview.innerHTML="";preview.appendChild(canvas);
  canvas.toBlob(blob=>{
@@ -479,7 +566,7 @@ $("reset").addEventListener("click",()=>{
  $("kabupaten").value="Hulu Sungai Selatan";$("provinsi").value="Kalimantan Selatan";
  $("latitude").value="";$("longitude").value="";$("altitude").value="";
  setNow();fontFamily.value="Arial";fontColor.value="#ffffff";bgColor.value="#ffffff";
- setOpacity(5);size.value="32";sizeValue.textContent="32";
+ setOpacity(5);size.value="32";sizeValue.textContent="32";$("includeMap").checked=true;
  $("fileName").textContent="Belum ada foto dipilih";$("previewSize").textContent="—";
  processBtn.disabled=true;downloadBtn.disabled=true;
  preview.innerHTML='<div class="empty"><div class="empty-icon">🖼️</div>Pilih foto untuk melihat preview</div>';
