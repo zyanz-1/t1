@@ -67,12 +67,43 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
 .empty{color:#94a3b8;text-align:center;font-size:13px;padding:30px}.empty-icon{font-size:34px;margin-bottom:8px}
 .footer-note{max-width:1120px;margin:14px auto 0;padding:0 20px;color:#98a2b3;font-size:11px;text-align:center}
 @media(max-width:850px){
- .layout{grid-template-columns:1fr}.preview{min-height:360px}.preview canvas{max-height:560px}
+ .layout{grid-template-columns:minmax(300px,340px) minmax(0,1fr)}
+ .preview{min-height:440px}.preview canvas{max-height:620px}
 }
-@media(max-width:500px){
- .container{padding:17px 12px 25px}.header-inner{padding:15px 13px}.privacy{display:none}
- .controls{padding:14px}.actions{grid-template-columns:1fr}.options{grid-template-columns:1fr}
- .preview{min-height:280px}.intro h1{font-size:22px}
+@media(max-width:780px){
+ .container{padding:20px 16px 30px}
+ .layout{grid-template-columns:1fr;gap:14px}
+ .controls{width:100%}
+ .preview{min-height:380px}
+ .preview canvas{max-height:620px}
+}
+@media(max-width:560px){
+ .container{padding:16px 10px 24px}
+ .header-inner{padding:14px 11px}
+ .brand-icon{width:36px;height:36px;font-size:19px}
+ .brand-title{font-size:15px}
+ .brand-sub{font-size:11px}
+ .privacy{display:none}
+ .controls{padding:13px}
+ .row,.options,.address-grid{grid-template-columns:1fr}
+ .actions{grid-template-columns:1fr}
+ .map-actions{grid-template-columns:1fr}
+ .preview{min-height:280px;padding:6px}
+ .preview canvas{max-height:560px;max-width:100%}
+ .preview-head{gap:8px;flex-wrap:wrap}
+ .intro h1{font-size:21px}
+ .intro p{font-size:13px}
+}
+@media(max-width:380px){
+ .container{padding-left:8px;padding-right:8px}
+ .controls{padding:11px}
+ .section-title{font-size:13px}
+ label{font-size:11px}
+ input[type=text],input[type=date],input[type=time],input[type=number],select{height:40px;font-size:13px}
+ .btn{height:41px;font-size:13px}
+ #map{height:230px}
+ .range-row{gap:6px}
+ .range-row input[type=number]{width:52px}
 }
 
 /* Map & location controls */
@@ -82,9 +113,13 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
 .map-output-toggle input{width:17px;height:17px;accent-color:var(--primary);cursor:pointer}
 .map-output-toggle span{font-weight:700}
 
-.location-status{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
+.location-status{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4;overflow-wrap:anywhere}
 .leaflet-container{font-family:inherit}
 .address-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.row>div,.options>div,.address-grid>div{min-width:0}
+input,select,button{max-width:100%;min-width:0}
+#mapsLocation,#latitude,#longitude,#desa,#kecamatan,#kabupaten,#provinsi,#altitude,#date,#time{min-width:0}
+.map-actions .btn{min-width:0;white-space:normal;line-height:1.2;padding:0 9px}
 @media(max-width:500px){.map-actions{grid-template-columns:1fr}.address-grid{grid-template-columns:1fr}}
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -490,11 +525,9 @@ async function buildMapInset(lat,lon){
 function drawMapInset(ctx,mapCanvas,position,margin){
  const targetW=Math.round(Math.min(ctx.canvas.width*.27,260));
  const targetH=Math.round(targetW*.66);
- const right=position.includes("right");
- const bottom=position.includes("bottom");
- // Put map opposite the timestamp to avoid overlap.
- const x=right?margin:ctx.canvas.width-targetW-margin;
- const y=bottom?margin:ctx.canvas.height-targetH-margin;
+ // Peta selalu ditempatkan di kiri bawah sesuai desain output.
+ const x=margin;
+ const y=ctx.canvas.height-targetH-margin;
  ctx.save();
  ctx.shadowColor="rgba(0,0,0,.28)";ctx.shadowBlur=10;ctx.shadowOffsetY=3;
  ctx.drawImage(mapCanvas,x,y,targetW,targetH);
@@ -575,6 +608,7 @@ $("reset").addEventListener("click",()=>{
 });
 
 window.addEventListener("load",initMap);
+window.addEventListener("resize",()=>{if(map)setTimeout(()=>map.invalidateSize(),120)});
 </script>
 </body>
 </html>
