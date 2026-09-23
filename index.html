@@ -74,7 +74,17 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
  .controls{padding:14px}.actions{grid-template-columns:1fr}.options{grid-template-columns:1fr}
  .preview{min-height:280px}.intro h1{font-size:22px}
 }
+
+/* Map & location controls */
+#map{height:270px;border-radius:12px;border:1px solid #d0d5dd;overflow:hidden;margin-top:9px}
+.map-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.location-status{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
+.leaflet-container{font-family:inherit}
+.address-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+@media(max-width:500px){.map-actions{grid-template-columns:1fr}.address-grid{grid-template-columns:1fr}}
 </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIINfQ3yYQ5aKQ9qk6h4h6r5v3l4X4Y5w4=" crossorigin=""/>
 </head>
 <body>
 <div class="app">
@@ -107,14 +117,34 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
 
       <h2 class="section-title" style="margin-top:20px">2. Informasi Timestamp</h2>
 
-      <label for="mapsLocation">Lokasi Google Maps</label>
+      <label for="mapsLocation">Koordinat</label>
       <input id="mapsLocation" type="text" inputmode="decimal" autocomplete="off"
-             placeholder="-2.5639942720543907, 115.0435160264135">
-      <div class="hint">Salin koordinat dari Google Maps, lalu tekan lama/klik kanan pada kolom ini dan pilih <b>Paste</b>.</div>
+             placeholder="-2.7833, 115.2667">
+      <div class="hint">Pilih titik langsung pada peta, tempel koordinat, atau gunakan lokasi perangkat.</div>
+      <div id="map"></div>
+      <div class="map-actions">
+        <button id="useLocation" type="button" class="btn btn-secondary">📍 Ambil Lokasi Saya</button>
+        <button id="defaultLocation" type="button" class="btn btn-secondary">🏠 Kembali ke Kandangan</button>
+      </div>
+      <div id="locationStatus" class="location-status">Klik peta untuk memilih lokasi.</div>
+
+      <div class="address-grid">
+        <div><label for="desa">Desa / Kelurahan</label><input id="desa" type="text" placeholder="Nama desa/kelurahan"></div>
+        <div><label for="kecamatan">Kecamatan</label><input id="kecamatan" type="text" placeholder="Nama kecamatan"></div>
+        <div><label for="kabupaten">Kabupaten</label><input id="kabupaten" type="text" value="Hulu Sungai Selatan"></div>
+        <div><label for="provinsi">Provinsi</label><input id="provinsi" type="text" value="Kalimantan Selatan"></div>
+      </div>
 
       <div class="row">
+        <div><label for="latitude">Latitude</label><input id="latitude" type="text" inputmode="decimal" placeholder="-2.783300"></div>
+        <div><label for="longitude">Longitude</label><input id="longitude" type="text" inputmode="decimal" placeholder="115.266700"></div>
+      </div>
+      <div class="row">
+        <div><label for="altitude">Ketinggian (mdpl)</label><input id="altitude" type="number" step="0.1" placeholder="Opsional"></div>
         <div><label for="date">Tanggal</label><input id="date" type="date"></div>
-        <div><label for="time">Jam</label><input id="time" type="time" step="1"></div>
+      </div>
+      <div>
+        <label for="time">Jam</label><input id="time" type="time" step="1">
       </div>
 
       <h2 class="section-title" style="margin-top:20px">3. Tampilan</h2>
@@ -163,14 +193,14 @@ input[type=color]{width:100%;height:42px;padding:3px;border:1px solid #d0d5dd;bo
         <div>
           <label for="bgColor" style="margin-top:0">Warna background teks</label>
           <div class="color-input">
-            <input id="bgColor" type="color" value="#000000" title="Pilih warna background teks">
+            <input id="bgColor" type="color" value="#ffffff" title="Pilih warna background teks">
           </div>
         </div>
         <div>
           <label for="bgOpacity" style="margin-top:0">Transparansi background</label>
           <div class="range-row">
-            <input id="bgOpacity" type="range" min="0" max="100" value="20">
-            <input id="bgOpacityNumber" type="number" min="0" max="100" step="1" value="20"
+            <input id="bgOpacity" type="range" min="0" max="100" value="5">
+            <input id="bgOpacityNumber" type="number" min="0" max="100" step="1" value="5"
                    aria-label="Transparansi background dalam persen"
                    title="Masukkan transparansi 0 sampai 100 persen">
             <span class="opacity-value">%</span>
@@ -206,7 +236,10 @@ const fileInput=$("file"),drop=$("drop"),processBtn=$("process"),downloadBtn=$("
 const preview=$("preview"),status=$("status"),size=$("size"),sizeValue=$("sizeValue");
 const fontFamily=$("fontFamily"),fontColor=$("fontColor"),bgColor=$("bgColor"),
       bgOpacity=$("bgOpacity"),bgOpacityNumber=$("bgOpacityNumber");
+
 let originalImage=null,outputBlob=null,originalFileName="foto";
+const DEFAULT={lat:-2.7833,lon:115.2667};
+let map,marker;
 
 function pad(n){return String(n).padStart(2,"0")}
 function setNow(){
@@ -219,17 +252,114 @@ setNow();
 size.addEventListener("input",()=>sizeValue.textContent=size.value);
 
 function setOpacity(value){
-  let v=Number(value);
-  if(!Number.isFinite(v)) v=20;
-  v=Math.min(100,Math.max(0,Math.round(v)));
-  bgOpacity.value=v;
-  bgOpacityNumber.value=v;
+ let v=Number(value);
+ if(!Number.isFinite(v))v=5;
+ v=Math.min(100,Math.max(0,Math.round(v)));
+ bgOpacity.value=v;bgOpacityNumber.value=v;
 }
-
 bgOpacity.addEventListener("input",()=>setOpacity(bgOpacity.value));
 bgOpacityNumber.addEventListener("input",()=>setOpacity(bgOpacityNumber.value));
 bgOpacityNumber.addEventListener("change",()=>setOpacity(bgOpacityNumber.value));
-setOpacity(20);
+setOpacity(5);
+
+function setStatus(text,error=false){
+ status.textContent=text;
+ status.style.color=error?"#b42318":"#667085";
+ status.style.background=error?"#fff1f0":"#f8fafc";
+}
+function setLocationStatus(text,error=false){
+ $("locationStatus").textContent=text;
+ $("locationStatus").style.color=error?"#b42318":"#667085";
+}
+
+function parseMapsLocation(value){
+ const text=String(value).trim().replace(/[()]/g,"");
+ const match=text.match(/^\s*([+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+))\s*,\s*([+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+))\s*$/);
+ if(!match)return null;
+ const lat=Number(match[1].replace(",","."));
+ const lon=Number(match[2].replace(",","."));
+ if(!Number.isFinite(lat)||!Number.isFinite(lon)||lat<-90||lat>90||lon<-180||lon>180)return null;
+ return {lat,lon};
+}
+
+function formatCoord(n){return Number(n).toFixed(6)}
+function setCoords(lat,lon,moveMap=true){
+ $("latitude").value=formatCoord(lat);
+ $("longitude").value=formatCoord(lon);
+ $("mapsLocation").value=`${formatCoord(lat)}, ${formatCoord(lon)}`;
+ if(map && moveMap){
+   map.setView([lat,lon],16);
+   if(marker)marker.setLatLng([lat,lon]);
+   else marker=L.marker([lat,lon],{draggable:true}).addTo(map);
+ }
+}
+
+async function reverseGeocode(lat,lon){
+ setLocationStatus("Mengambil nama desa/kecamatan dari koordinat…");
+ try{
+   const url=`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=18&addressdetails=1`;
+   const res=await fetch(url,{headers:{"Accept":"application/json"}});
+   if(!res.ok)throw new Error("HTTP "+res.status);
+   const data=await res.json();
+   const a=data.address||{};
+   $("desa").value=a.village||a.hamlet||a.suburb||a.neighbourhood||a.town||$("desa").value;
+   $("kecamatan").value=a.municipality||a.county||a.city_district||a.district||$("kecamatan").value;
+   $("kabupaten").value=a.city||a.regency||a.county||$("kabupaten").value||"Hulu Sungai Selatan";
+   $("provinsi").value=a.state||$("provinsi").value||"Kalimantan Selatan";
+   setLocationStatus("Lokasi dan alamat berhasil diperbarui. Alamat tetap bisa diedit manual.");
+ }catch(e){
+   setLocationStatus("Koordinat berhasil dipilih, tetapi nama wilayah tidak dapat diambil otomatis. Silakan isi/edit manual.",true);
+ }
+}
+
+function selectLocation(lat,lon,lookup=true){
+ setCoords(lat,lon,true);
+ if(lookup)reverseGeocode(lat,lon);
+ else setLocationStatus("Lokasi Kandangan digunakan sebagai titik awal.");
+}
+
+function initMap(){
+ map=L.map("map").setView([DEFAULT.lat,DEFAULT.lon],14);
+ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+   maxZoom:19,attribution:"© OpenStreetMap contributors"
+ }).addTo(map);
+
+ marker=L.marker([DEFAULT.lat,DEFAULT.lon],{draggable:true}).addTo(map);
+ marker.on("dragend",e=>{
+   const p=e.target.getLatLng();
+   selectLocation(p.lat,p.lng,true);
+ });
+ map.on("click",e=>selectLocation(e.latlng.lat,e.latlng.lng,true));
+ selectLocation(DEFAULT.lat,DEFAULT.lon,true);
+}
+
+$("mapsLocation").addEventListener("change",()=>{
+ const c=parseMapsLocation($("mapsLocation").value);
+ if(c)selectLocation(c.lat,c.lon,true);
+ else setLocationStatus("Format koordinat tidak valid. Contoh: -2.783300, 115.266700",true);
+});
+$("latitude").addEventListener("change",syncManualCoords);
+$("longitude").addEventListener("change",syncManualCoords);
+function syncManualCoords(){
+ const lat=Number(String($("latitude").value).replace(",","."));
+ const lon=Number(String($("longitude").value).replace(",","."));
+ if(Number.isFinite(lat)&&Number.isFinite(lon)&&lat>=-90&&lat<=90&&lon>=-180&&lon<=180){
+   setCoords(lat,lon,true);reverseGeocode(lat,lon);
+ }
+}
+$("useLocation").addEventListener("click",()=>{
+ if(!navigator.geolocation){setLocationStatus("Browser tidak mendukung geolocation.",true);return}
+ setLocationStatus("Meminta izin lokasi perangkat…");
+ navigator.geolocation.getCurrentPosition(
+   pos=>selectLocation(pos.coords.latitude,pos.coords.longitude,true),
+   err=>setLocationStatus("Lokasi tidak dapat diambil: "+(
+     err.code===1?"izin lokasi ditolak.":err.code===2?"lokasi tidak tersedia.":"permintaan lokasi timeout."
+   ),true),
+   {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+ );
+});
+$("defaultLocation").addEventListener("click",()=>selectLocation(DEFAULT.lat,DEFAULT.lon,true));
+
 drop.addEventListener("click",()=>fileInput.click());
 drop.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")fileInput.click()});
 fileInput.addEventListener("change",e=>{if(e.target.files[0])loadImage(e.target.files[0])});
@@ -238,7 +368,7 @@ fileInput.addEventListener("change",e=>{if(e.target.files[0])loadImage(e.target.
 drop.addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)loadImage(f)});
 
 function loadImage(file){
- if(!file.type.startsWith("image/")){setStatus("File harus berupa gambar.");return}
+ if(!file.type.startsWith("image/")){setStatus("File harus berupa gambar.",true);return}
  const reader=new FileReader();
  reader.onload=e=>{
   const img=new Image();
@@ -257,26 +387,15 @@ function loadImage(file){
  reader.readAsDataURL(file);
 }
 
-function parseMapsLocation(value){
- const text=String(value).trim();
- // Mendukung paste koordinat Google Maps:
- // -2.5639942720543907, 115.0435160264135
- // serta format dengan spasi/newline.
- const cleaned=text.replace(/[()]/g,"").trim();
- const match=cleaned.match(/^\s*([+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+))\s*,\s*([+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+))\s*$/);
- if(!match)return null;
- const lat=Number(match[1].replace(",","."));
- const lon=Number(match[2].replace(",","."));
- if(!Number.isFinite(lat)||!Number.isFinite(lon)||lat<-90||lat>90||lon<-180||lon>180)return null;
- return {lat,lon};
-}
-
-function setStatus(text,error=false){status.textContent=text;status.style.color=error?"#b42318":"#667085";status.style.background=error?"#fff1f0":"#f8fafc"}
-
 function valid(){
  if(!originalImage){setStatus("Pilih foto terlebih dahulu.",true);return null}
- const coords=parseMapsLocation($("mapsLocation").value);
- if(!coords){setStatus("Koordinat tidak valid. Contoh: -2.5639942720543907, 115.0435160264135",true);return null}
+ let coords=parseMapsLocation($("mapsLocation").value);
+ if(!coords){
+   const lat=Number(String($("latitude").value).replace(",","."));
+   const lon=Number(String($("longitude").value).replace(",","."));
+   if(Number.isFinite(lat)&&Number.isFinite(lon)&&lat>=-90&&lat<=90&&lon>=-180&&lon<=180)coords={lat,lon};
+ }
+ if(!coords){setStatus("Koordinat tidak valid. Pilih titik pada peta atau isi latitude dan longitude.",true);return null}
  if(!$("date").value||!$("time").value){setStatus("Tanggal dan jam harus diisi.",true);return null}
  return coords;
 }
@@ -286,72 +405,60 @@ function dateTimeText(){
 }
 function roundedRect(ctx,x,y,w,h,r){
  const rr=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+rr,y);
- ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();
+ ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);
+ ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();
+}
+function addressText(){
+ const parts=[
+   $("desa").value.trim(),
+   $("kecamatan").value.trim(),
+   $("kabupaten").value.trim(),
+   $("provinsi").value.trim()
+ ].filter(Boolean);
+ return parts.join(", ");
 }
 
 processBtn.addEventListener("click",()=>{
-  const coords=valid();if(!coords)return;
+ const coords=valid();if(!coords)return;
+ const canvas=document.createElement("canvas"),ctx=canvas.getContext("2d");
+ canvas.width=originalImage.naturalWidth;canvas.height=originalImage.naturalHeight;
+ ctx.drawImage(originalImage,0,0);
 
-  const canvas=document.createElement("canvas"),ctx=canvas.getContext("2d");
-  canvas.width=originalImage.naturalWidth;
-  canvas.height=originalImage.naturalHeight;
-  ctx.drawImage(originalImage,0,0);
+ const s=Number(size.value);
+ const altitude=$("altitude").value.trim();
+ const line1=`${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`;
+ const line2=altitude?`Elevasi: ${altitude} mdpl`:"";
+ const line3=dateTimeText();
+ const line4=addressText();
 
-  const s=Number(size.value);
-  const line1=`${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`;
-  const line2=dateTimeText();
+ const lines=[line1,line2,line3,line4].filter(Boolean);
+ const fontName=fontFamily.value||"Arial";
+ const textColor=fontColor.value||"#ffffff";
+ const backgroundColor=bgColor.value||"#ffffff";
+ const backgroundAlpha=Number(bgOpacity.value)/100;
 
-  const fontName=fontFamily.value || "Arial";
-  const textColor=fontColor.value || "#ffffff";
-  const backgroundColor=bgColor.value || "#000000";
-  const backgroundAlpha=Number(bgOpacity.value)/100;
+ ctx.font=`700 ${s}px "${fontName}", Arial, sans-serif`;ctx.textBaseline="top";
+ const padX=Math.round(s*.65),padY=Math.round(s*.5),gap=Math.round(s*.18);
+ const widths=lines.map(t=>ctx.measureText(t).width);
+ const w=Math.ceil(Math.max(...widths)+padX*2);
+ const h=Math.ceil(lines.length*s+(lines.length-1)*gap+padY*2);
+ const margin=Math.round(s*.8);
+ let x=$("position").value.includes("right")?canvas.width-w-margin:margin;
+ let y=$("position").value.includes("bottom")?canvas.height-h-margin:margin;
+ x=Math.max(0,x);y=Math.max(0,y);
 
-  // Set font BEFORE measuring, so the background always fits the selected font.
-  ctx.font=`700 ${s}px "${fontName}", Arial, sans-serif`;
-  ctx.textBaseline="top";
+ ctx.save();
+ roundedRect(ctx,x,y,w,h,Math.round(s*.25));
+ ctx.globalAlpha=backgroundAlpha;ctx.fillStyle=backgroundColor;ctx.fill();
+ ctx.globalAlpha=1;ctx.fillStyle=textColor;ctx.font=`700 ${s}px "${fontName}", Arial, sans-serif`;
+ lines.forEach((line,i)=>ctx.fillText(line,x+padX,y+padY+i*(s+gap)));
+ ctx.restore();
 
-  const padX=Math.round(s*.65);
-  const padY=Math.round(s*.5);
-  const gap=Math.round(s*.18);
-  const w=Math.ceil(Math.max(ctx.measureText(line1).width,ctx.measureText(line2).width)+padX*2);
-  const h=Math.ceil(s*2+gap+padY*2);
-  const margin=Math.round(s*.8);
-
-  let x=$("position").value.includes("right")?canvas.width-w-margin:margin;
-  let y=$("position").value.includes("bottom")?canvas.height-h-margin:margin;
-  x=Math.max(0,x);y=Math.max(0,y);
-
-  ctx.save();
-
-  // Only the background receives the selected transparency.
-  roundedRect(ctx,x,y,w,h,Math.round(s*.25));
-  ctx.globalAlpha=backgroundAlpha;
-  ctx.fillStyle=backgroundColor;
-  ctx.fill();
-
-  // Critical fix: restore full opacity before drawing text.
-  // Previously, a low background opacity could also make white text transparent.
-  ctx.globalAlpha=1;
-  ctx.fillStyle=textColor;
-  ctx.font=`700 ${s}px "${fontName}", Arial, sans-serif`;
-  ctx.textBaseline="top";
-  ctx.fillText(line1,x+padX,y+padY);
-  ctx.fillText(line2,x+padX,y+padY+s+gap);
-
-  ctx.restore();
-
-  preview.innerHTML="";
-  preview.appendChild(canvas);
-
-  canvas.toBlob(blob=>{
-    if(!blob){
-      setStatus("Gagal membuat file hasil.",true);
-      return;
-    }
-    outputBlob=blob;
-    downloadBtn.disabled=false;
-    setStatus("Timestamp berhasil ditambahkan. Foto siap diunduh.");
-  },"image/jpeg",.95);
+ preview.innerHTML="";preview.appendChild(canvas);
+ canvas.toBlob(blob=>{
+   if(!blob){setStatus("Gagal membuat file hasil.",true);return}
+   outputBlob=blob;downloadBtn.disabled=false;setStatus("Timestamp berhasil ditambahkan. Foto siap diunduh.");
+ },"image/jpeg",.95);
 });
 
 downloadBtn.addEventListener("click",()=>{
@@ -362,15 +469,20 @@ downloadBtn.addEventListener("click",()=>{
 });
 
 $("reset").addEventListener("click",()=>{
- originalImage=null;outputBlob=null;fileInput.value="";$("mapsLocation").value="";
- setNow();
-  fontFamily.value="Arial";fontColor.value="#ffffff";bgColor.value="#000000";
-  setOpacity(20);size.value="32";sizeValue.textContent="32";
-  $("fileName").textContent="Belum ada foto dipilih";$("previewSize").textContent="—";
+ originalImage=null;outputBlob=null;fileInput.value="";
+ $("mapsLocation").value="";$("desa").value="";$("kecamatan").value="";
+ $("kabupaten").value="Hulu Sungai Selatan";$("provinsi").value="Kalimantan Selatan";
+ $("latitude").value="";$("longitude").value="";$("altitude").value="";
+ setNow();fontFamily.value="Arial";fontColor.value="#ffffff";bgColor.value="#ffffff";
+ setOpacity(5);size.value="32";sizeValue.textContent="32";
+ $("fileName").textContent="Belum ada foto dipilih";$("previewSize").textContent="—";
  processBtn.disabled=true;downloadBtn.disabled=true;
  preview.innerHTML='<div class="empty"><div class="empty-icon">🖼️</div>Pilih foto untuk melihat preview</div>';
  setStatus("Formulir telah direset.");
+ if(map)selectLocation(DEFAULT.lat,DEFAULT.lon,true);
 });
+
+window.addEventListener("load",initMap);
 </script>
 </body>
 </html>
